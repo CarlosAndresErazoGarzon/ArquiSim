@@ -31,4 +31,8 @@
         addi  $s1, $zero, 7         # a
         addi  $s2, $zero, 4         # b
 # escriba aquí su código
-
+        add   $s3, $s1, $s1
+        add   $s3, $s3, $s1
+        add   $s4, $s2, $s2
+        sub   $s0, $s3, $s4
+        sub   $s3, $s1, $s2

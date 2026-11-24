@@ -249,6 +249,313 @@ Resultado ejecutar(CPU *cpu, const Instruccion *in)
      * Pruebe con:  make test
      */
 
+    /* ---------------- sub ---------------- */
+    if (es(in, "sub")) {
+        uint32_t r = restar_con_banderas(cpu, cpu->reg[in->rs], cpu->reg[in->rt]);
+        if (es(in, "sub") && (cpu->banderas & BANDERA_V))
+            return excepcion(cpu, "desbordamiento aritmético en sub");
+        escribir_registro(cpu, in->rd, r);
+        return OK;
+    }
+
+    /* ---------------- Lógicas tipo R: and, or, xor, nor ---------------- */
+    if (es(in, "and")) {
+        uint32_t r = cpu->reg[in->rs] & cpu->reg[in->rt];
+        escribir_registro(cpu, in->rd, banderas_logicas(cpu, r));
+        return OK;
+    }
+    if (es(in, "or")) {
+        uint32_t r = cpu->reg[in->rs] | cpu->reg[in->rt];
+        escribir_registro(cpu, in->rd, banderas_logicas(cpu, r));
+        return OK;
+    }
+    if (es(in, "xor")) {
+        uint32_t r = cpu->reg[in->rs] ^ cpu->reg[in->rt];
+        escribir_registro(cpu, in->rd, banderas_logicas(cpu, r));
+        return OK;
+    }
+    if (es(in, "nor")) {
+        uint32_t r = ~(cpu->reg[in->rs] | cpu->reg[in->rt]);
+        escribir_registro(cpu, in->rd, banderas_logicas(cpu, r));
+        return OK;
+    }
+
+    /* ---------------- Desplazamientos: sll, srl, sra ---------------- */
+    if (es(in, "sll")) {
+        uint32_t r = cpu->reg[in->rt] << in->shamt;
+        escribir_registro(cpu, in->rd, r);
+        return OK;
+    }
+    if (es(in, "srl")) {
+        uint32_t r = cpu->reg[in->rt] >> in->shamt;
+        escribir_registro(cpu, in->rd, r);
+        return OK;
+    }
+    if (es(in, "sra")) {
+        /* Desplazamiento aritmético: conserva el signo convirtiendo a int32_t */
+        int32_t val = (int32_t)cpu->reg[in->rt];
+        uint32_t r = (uint32_t)(val >> in->shamt);
+        escribir_registro(cpu, in->rd, r);
+        return OK;
+    }
+
+    /* ---------------- Lógicas tipo I: andi, ori, xori, lui ---------------- */
+    if (es(in, "andi")) {
+        /* Inmediato extendido con ceros: in->imm */
+        uint32_t r = cpu->reg[in->rs] & in->imm;
+        escribir_registro(cpu, in->rt, banderas_logicas(cpu, r));
+        return OK;
+    }
+    if (es(in, "ori")) {
+        uint32_t r = cpu->reg[in->rs] | in->imm;
+        escribir_registro(cpu, in->rt, banderas_logicas(cpu, r));
+        return OK;
+    }
+    if (es(in, "xori")) {
+        uint32_t r = cpu->reg[in->rs] ^ in->imm;
+        escribir_registro(cpu, in->rt, banderas_logicas(cpu, r));
+        return OK;
+    }
+    if (es(in, "lui")) {
+        uint32_t r = in->imm << 16;
+        escribir_registro(cpu, in->rt, r);
+        return OK;
+    }
+
+    /* ---------------- 04_sin_signo.asm ---------------- */
+    if (es(in, "addu")) {
+        /* Suma sin verificar excepción por desbordamiento */
+        uint32_t r = sumar_con_banderas(cpu, cpu->reg[in->rs], cpu->reg[in->rt]);
+        escribir_registro(cpu, in->rd, r);
+        return OK;
+    }
+
+    if (es(in, "subu")) {
+        /* Resta sin verificar excepción por desbordamiento */
+        uint32_t r = restar_con_banderas(cpu, cpu->reg[in->rs], cpu->reg[in->rt]);
+        escribir_registro(cpu, in->rd, r);
+        return OK;
+    }
+
+    if (es(in, "addiu")) {
+        /* Inmediato con signo (in->simm), sin excepción por desbordamiento */
+        uint32_t r = sumar_con_banderas(cpu, cpu->reg[in->rs], (uint32_t)in->simm);
+        escribir_registro(cpu, in->rt, r);
+        return OK;
+    }
+
+
+    /* Etapa 2: Acceso a Memoria    */
+    if (es(in, "lw")) {
+        uint32_t dir = cpu->reg[in->rs] + (uint32_t)in->simm;
+        uint32_t valor;
+        if (leer_palabra(cpu, dir, &valor) != OK)
+            return EXCEPCION;
+        escribir_registro(cpu, in->rt, valor);
+        return OK;
+    }
+
+    if (es(in, "sw")) {
+        uint32_t dir = cpu->reg[in->rs] + (uint32_t)in->simm;
+        if (escribir_palabra(cpu, dir, cpu->reg[in->rt]) != OK)
+            return EXCEPCION;
+        return OK;
+    }
+
+    if (es(in, "lb")) {
+        uint32_t dir = cpu->reg[in->rs] + (uint32_t)in->simm;
+        uint8_t byte;
+        if (leer_byte(cpu, dir, &byte) != OK)
+            return EXCEPCION;
+        /* Extensión de signo de 8 a 32 bits */
+        escribir_registro(cpu, in->rt, (uint32_t)(int32_t)(int8_t)byte);
+        return OK;
+    }
+
+    if (es(in, "lbu")) {
+        uint32_t dir = cpu->reg[in->rs] + (uint32_t)in->simm;
+        uint8_t byte;
+        if (leer_byte(cpu, dir, &byte) != OK)
+            return EXCEPCION;
+        /* Extensión con ceros */
+        escribir_registro(cpu, in->rt, (uint32_t)byte);
+        return OK;
+    }
+
+    if (es(in, "sb")) {
+        uint32_t dir = cpu->reg[in->rs] + (uint32_t)in->simm;
+        if (escribir_byte(cpu, dir, (uint8_t)(cpu->reg[in->rt] & 0xFFu)) != OK)
+            return EXCEPCION;
+        return OK;
+    }
+
+    /* Etapa 3: Control de Flujo, Funciones y Pila  */
+    if (es(in, "bne")) {
+        if (cpu->reg[in->rs] != cpu->reg[in->rt])
+            cpu->pc += (uint32_t)in->simm << 2;
+        return OK;
+    }
+
+    if (es(in, "beq")) {
+        if (cpu->reg[in->rs] == cpu->reg[in->rt])
+            cpu->pc += (uint32_t)in->simm << 2;
+        return OK;
+    }
+
+    if (es(in, "j")) {
+        cpu->pc = (cpu->pc & 0xF0000000u) | (in->direccion << 2);
+        return OK;
+    }
+
+    if (es(in, "jal")) {
+        escribir_registro(cpu, REG_RA, cpu->pc);
+        cpu->pc = (cpu->pc & 0xF0000000u) | (in->direccion << 2);
+        return OK;
+    }
+
+    if (es(in, "jr")) {
+        cpu->pc = cpu->reg[in->rs];
+        return OK;
+    }
+
+    if (es(in, "slt")) {
+        int32_t a = (int32_t)cpu->reg[in->rs];
+        int32_t b = (int32_t)cpu->reg[in->rt];
+        escribir_registro(cpu, in->rd, (a < b) ? 1 : 0);
+        return OK;
+    }
+
+    if (es(in, "sltu")) {
+        uint32_t a = cpu->reg[in->rs];
+        uint32_t b = cpu->reg[in->rt];
+        escribir_registro(cpu, in->rd, (a < b) ? 1 : 0);
+        return OK;
+    }
+
+    if (es(in, "slti")) {
+        int32_t a = (int32_t)cpu->reg[in->rs];
+        int32_t imm = in->simm;
+        escribir_registro(cpu, in->rt, (a < imm) ? 1 : 0);
+        return OK;
+    }
+
+    /* ---------------- Acumulador (1 dirección) ---------------- */
+    if (es(in, "mtacc")) {
+        cpu->acc = cpu->reg[in->rs];
+        return OK;
+    }
+
+    if (es(in, "mfacc")) {
+        escribir_registro(cpu, in->rd, cpu->acc);
+        return OK;
+    }
+
+    if (es(in, "adda")) {
+        cpu->acc = sumar_con_banderas(cpu, cpu->acc, cpu->reg[in->rt]);
+        return OK;
+    }
+
+    if (es(in, "suba")) {
+        cpu->acc = restar_con_banderas(cpu, cpu->acc, cpu->reg[in->rt]);
+        return OK;
+    }
+
+    if (es(in, "addia")) {
+        cpu->acc = sumar_con_banderas(cpu, cpu->acc, (uint32_t)in->simm);
+        return OK;
+    }
+
+    /* ---------------- Banderas y Saltos condicionales ---------------- */
+    if (es(in, "cmp")) {
+        /* Resta solo para fijar banderas, no escribe en ningún registro */
+        restar_con_banderas(cpu, cpu->reg[in->rs], cpu->reg[in->rt]);
+        return OK;
+    }
+
+    if (es(in, "jz")) {
+        if (cpu->banderas & BANDERA_Z)
+            cpu->pc = (cpu->pc & 0xF0000000u) | (in->direccion << 2);
+        return OK;
+    }
+
+    if (es(in, "jn")) {
+        if (cpu->banderas & BANDERA_N)
+            cpu->pc = (cpu->pc & 0xF0000000u) | (in->direccion << 2);
+        return OK;
+    }
+
+    if (es(in, "jc")) {
+        if (cpu->banderas & BANDERA_C)
+            cpu->pc = (cpu->pc & 0xF0000000u) | (in->direccion << 2);
+        return OK;
+    }
+
+    if (es(in, "jv")) {
+        if (cpu->banderas & BANDERA_V)
+            cpu->pc = (cpu->pc & 0xF0000000u) | (in->direccion << 2);
+        return OK;
+    }
+
+    /* ---------------- Multiplicación y División ---------------- */
+    if (es(in, "mult")) {
+        int64_t a = (int32_t)cpu->reg[in->rs];
+        int64_t b = (int32_t)cpu->reg[in->rt];
+        int64_t res = a * b;
+        cpu->hi = (uint32_t)((uint64_t)res >> 32);
+        cpu->lo = (uint32_t)((uint64_t)res & 0xFFFFFFFFu);
+        return OK;
+    }
+
+    if (es(in, "multu")) {
+        uint64_t a = (uint32_t)cpu->reg[in->rs];
+        uint64_t b = (uint32_t)cpu->reg[in->rt];
+        uint64_t res = a * b;
+        cpu->hi = (uint32_t)(res >> 32);
+        cpu->lo = (uint32_t)(res & 0xFFFFFFFFu);
+        return OK;
+    }
+
+    if (es(in, "div")) {
+        int32_t a = (int32_t)cpu->reg[in->rs];
+        int32_t b = (int32_t)cpu->reg[in->rt];
+        if (b == 0)
+            return excepcion(cpu, "división por cero");
+        cpu->lo = (uint32_t)(a / b);
+        cpu->hi = (uint32_t)(a % b);
+        return OK;
+    }
+
+    if (es(in, "divu")) {
+        uint32_t a = cpu->reg[in->rs];
+        uint32_t b = cpu->reg[in->rt];
+        if (b == 0)
+            return excepcion(cpu, "división por cero");
+        cpu->lo = a / b;
+        cpu->hi = a % b;
+        return OK;
+    }
+
+    if (es(in, "mfhi")) {
+        escribir_registro(cpu, in->rd, cpu->hi);
+        return OK;
+    }
+
+    if (es(in, "mflo")) {
+        escribir_registro(cpu, in->rd, cpu->lo);
+        return OK;
+    }
+
+    if (es(in, "mul")) {
+        uint32_t r = (uint32_t)((int32_t)cpu->reg[in->rs] * (int32_t)cpu->reg[in->rt]);
+        escribir_registro(cpu, in->rd, r);
+        return OK;
+    }
+
+    /* ---------------- Syscall ---------------- */
+    if (es(in, "syscall")) {
+        return llamar_sistema(cpu);
+    }
+
     return excepcion(cpu, "instrucción '%s' no implementada (ver src/ejecutar.c)",
                      in->def->nombre);
 }

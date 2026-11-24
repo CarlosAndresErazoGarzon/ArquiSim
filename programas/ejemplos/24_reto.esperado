@@ -1,0 +1,13 @@
+# Negativos: -3, -7, -1 y -10. El cero no es negativo.
+$v0 = 4
+
+# A empieza en 0x200 y ocupa 8 * 4 = 32 bytes.
+# RESULTADO esta en 0x220.
+mem[0x220] = 4
+
+# mem[] verifica palabras de cuatro bytes, en orden big-endian.
+# Pixeles (0,0), (1,0), (2,0) y (3,0): rojo, codigo 1.
+mem[0x400] = 0x01010101
+
+# Pixeles (4,0), (5,0), (6,0) y (7,0): negro, codigo 0.
+mem[0x404] = 0x00000000
